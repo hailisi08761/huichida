@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { CompanyInfoModal } from './components/CompanyInfoModal';
 import { ProformaInvoiceSheet } from './components/ProformaInvoiceSheet';
+import { SmartImportModal } from './components/SmartImportModal';
 import {
   createBlankPi,
   DEFAULT_BANK_INFO,
@@ -45,6 +46,7 @@ import {
   ORIGIN_PORT_PRESETS,
   SHIPMENT_MODES,
 } from './utils/shippingMatcher';
+import { SmartImportResult } from './utils/smartImportParser';
 
 const STORAGE_PI_KEY = 'huichida_pi_draft_v1';
 const STORAGE_COMPANY_KEY = 'yitong_pi_company_v1';
@@ -122,6 +124,7 @@ export default function App() {
   });
 
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+  const [isSmartImportOpen, setIsSmartImportOpen] = useState(false);
   const [showAdvancedTerms, setShowAdvancedTerms] = useState(false);
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const [fitScale, setFitScale] = useState(0.78);
@@ -432,6 +435,78 @@ export default function App() {
     setExportError(null);
   };
 
+  const handleApplySmartImport = (
+    parsed: SmartImportResult,
+    options: { replaceProducts: boolean }
+  ) => {
+    setPiData((prev) => {
+      const nextLang = parsed.language || prev.language;
+      const nextBuyer = {
+        name: parsed.buyerName ?? prev.buyer.name,
+        address: parsed.buyerAddress ?? prev.buyer.address,
+        tel: parsed.buyerTel ?? prev.buyer.tel,
+      };
+
+      const nextOrigin = parsed.originPort || prev.shipping.originPort;
+      const nextDest = parsed.destinationPort || prev.shipping.destinationPort;
+
+      const inferred = inferShipping({
+        originPort: nextOrigin,
+        destinationPort: nextDest,
+        buyerAddress: nextBuyer.address,
+        buyerName: nextBuyer.name,
+        preferredMode: parsed.modeKey,
+        lang: nextLang,
+      });
+
+      let nextProducts = prev.products;
+      if (parsed.products.length > 0) {
+        if (options.replaceProducts) {
+          nextProducts = parsed.products;
+        } else {
+          const hasOnlyEmptyStarter =
+            prev.products.length === 1 &&
+            !prev.products[0].model &&
+            !prev.products[0].description &&
+            prev.products[0].unitPrice === 0;
+          nextProducts = hasOnlyEmptyStarter
+            ? parsed.products
+            : [...prev.products, ...parsed.products];
+        }
+      }
+
+      const nextPaymentPlan = parsed.paymentPlan || prev.shipping.paymentPlan;
+      const nextPaymentPercent =
+        nextPaymentPlan === 'full_100'
+          ? 100
+          : nextPaymentPlan === 'deposit_30_70'
+            ? 30
+            : parsed.paymentPercent ?? prev.shipping.paymentPercent;
+
+      return {
+        ...prev,
+        language: nextLang,
+        piNumber: parsed.piNumber || prev.piNumber,
+        date: parsed.date || prev.date,
+        buyer: nextBuyer,
+        products: nextProducts,
+        autoMatchShipping: true,
+        shipping: {
+          ...prev.shipping,
+          originPort: inferred.originPort,
+          destinationPort: inferred.destinationPort,
+          transportRoute: inferred.transportRoute,
+          modeKey: inferred.modeKey,
+          modeOfShipment: inferred.modeOfShipment,
+          timeOfShipment: inferred.timeOfShipment,
+          paymentPlan: nextPaymentPlan,
+          paymentPercent: nextPaymentPercent,
+        },
+      };
+    });
+    setExportError(null);
+  };
+
   const getExportFileBaseName = () => {
     const rawName = (piData.buyer.name || '').trim() || (sellerInfo.name || '').trim() || '汇驰达';
     const sanitized = rawName.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -535,6 +610,13 @@ export default function App() {
           </button>
           <button
             type="button"
+            onClick={() => setIsSmartImportOpen(true)}
+            className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            一键匹配导入
+          </button>
+          <button
+            type="button"
             onClick={() => setIsCompanyModalOpen(true)}
             className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
@@ -576,6 +658,15 @@ export default function App() {
             >
               <FilePlus2 className="w-3.5 h-3.5" />
               新建
+            </button>
+            <span className="text-slate-300">/</span>
+            <button
+              type="button"
+              onClick={() => setIsSmartImportOpen(true)}
+              className="inline-flex items-center gap-1 whitespace-nowrap shrink-0 hover:text-slate-900"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              匹配导入
             </button>
             <span className="text-slate-300">/</span>
             <button
@@ -637,19 +728,29 @@ export default function App() {
 
           {/* Section 01: PI Header & Buyer Info */}
           <section className="px-6 py-5 border-b border-slate-200 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-slate-900">
                 01. 单据编号与客户信息
               </h2>
-              <button
-                type="button"
-                onClick={handleRefreshPiNoAndDate}
-                className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
-                title="按今日日期更新编号与日期"
-              >
-                <RotateCcw className="w-3 h-3" />
-                按今日更新
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsSmartImportOpen(true)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-900 bg-slate-100 hover:bg-slate-200 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  一键匹配导入
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRefreshPiNoAndDate}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="按今日日期更新编号与日期"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  按今日更新
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -1355,6 +1456,15 @@ export default function App() {
             setSellerInfo(newSeller);
             setBankInfo(newBank);
           }}
+        />
+      )}
+
+      {/* One-Click Smart Import Modal */}
+      {isSmartImportOpen && (
+        <SmartImportModal
+          isOpen={isSmartImportOpen}
+          onClose={() => setIsSmartImportOpen(false)}
+          onApply={handleApplySmartImport}
         />
       )}
     </div>
