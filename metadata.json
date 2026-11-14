@@ -1,0 +1,6 @@
+{
+  "name": "Yitong PI Studio",
+  "description": "Proforma Invoice generator with automatic English amount-in-words, smart shipping route inference, company seal, and instant A4 PDF export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
